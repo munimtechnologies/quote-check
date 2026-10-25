@@ -4,6 +4,10 @@ One HTML file a teacher can open in any browser to see whether AI writing feedba
 student's words exactly, or quietly changed them. Paste the student's text and the feedback;
 every passage the feedback puts in quotation marks is checked against the student's text.
 
+**Open it in your browser:** https://rawcdn.githack.com/munimtechnologies/quote-check/v0.1.0/quote-check.html
+(release v0.1.0 of this repository's `quote-check.html`, served as-is by the free raw.githack.com
+CDN; the CDN only delivers the page, and the page itself sends nothing anywhere, see Privacy).
+
 By MV2 of Munim, Inc. Made with AI agents working in his name. Apache-2.0.
 
 ## Why
@@ -13,17 +17,18 @@ models sometimes "tidy" a quote as they copy it: a misspelling fixed, a word dro
 put in the right form. Then the student never sees their own error. In MV2's preregistered
 studies on English learners' essays
 ([feedback-commons/research](https://github.com/munimtechnologies/feedback-commons/tree/main/research),
-RESULTS-v3.md and RESULTS-v4.md), roughly one quote in ten from two small local models was not
-an exact copy. This page makes that check something any teacher can do in seconds, and shows
-**what the student actually wrote** next to each changed quote.
+RESULTS-v3.md to RESULTS-v5.md), roughly one quote in ten to fifteen from two small local models
+was not an exact copy (v5, powered: 1,314 of 1,416 matched quotes exact, about 93%). This page
+makes that check something any teacher can do in seconds, and shows **what the student actually
+wrote** next to each changed quote.
 
 As far as we could find (web and GitHub search, 2026-10-24), no other tool checks whether AI
 feedback quotes the student verbatim.
 
 ## Use
 
-1. Download [`quote-check.html`](quote-check.html) (on its page, use "Download raw file") and
-   open it in a browser by double-clicking. No install, no account.
+1. Open the link above, or download [`quote-check.html`](quote-check.html) (on its page, use
+   "Download raw file") and open it in a browser by double-clicking. No install, no account.
 2. Paste the student's text, then the AI feedback.
 3. Press **Check quotes**.
 
@@ -38,12 +43,19 @@ of the box is one quote** and paste one quote per line.
 | Changed words | close to a passage of the student's text, but words were added, dropped or changed; that passage is shown |
 | Not found | no passage is close enough (word similarity below the threshold, default 0.6) |
 
+To check many feedback replies at once (a JSONL file, one reply and its student text per line), use
+the command-line `quote_batch.py` in
+[feedback-commons `tools/`](https://github.com/munimtechnologies/feedback-commons/tree/main/tools),
+which uses the same checker as this page.
+
 ## Privacy
 
 Student text never leaves the computer. The page loads nothing and sends nothing: its
 Content-Security-Policy is `default-src 'none'`, so the browser itself blocks every network
 request, and `test_quote_check_html.py` checks that the file has no external scripts, styles,
-images, frames, forms or network calls. It works with the network switched off.
+images, frames, forms or network calls. It works with the network switched off. Opening it from
+the CDN link means the CDN sees that the page was requested, never what you paste into it; the
+downloaded file avoids even that.
 
 ## Same answers as the command-line tool
 
@@ -77,7 +89,6 @@ node parity.mjs quote-check.html cases.json
 - The "what the student wrote" passage is the closest window of about the quote's length; when
   several windows tie, the first one is shown.
 - The page and its tests were made by AI agents and have not yet been reviewed by a teacher.
-  Reports of wrong verdicts are welcome as issues on this repository.
 
 ## Licence
 
