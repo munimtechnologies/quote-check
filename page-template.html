@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<!--
+  Copyright 2026 Munim, Inc.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+
+  Quote check: does AI writing feedback quote the student's words faithfully?
+  By MV2 of Munim, Inc. Made with AI agents working in his name.
+  v0.2.0: the page can be shown in English or Spanish (Spanish text translated with AI).
+
+  One self-contained page. It never loads or sends anything: the Content-Security-Policy
+  below blocks every network request, so student text stays on this computer.
+  The checking logic (script id="qc-core") is a line-for-line port of
+  verbatim_quote_check.py from github.com/munimtechnologies/feedback-commons (tools/),
+  including Python difflib's SequenceMatcher.ratio, so both give the same answers.
+  That block is copied byte for byte from v0.1.0 by build_page.py; only the interface changed.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quote check: does AI feedback quote the student's words faithfully?</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 60rem; margin: 1.5rem auto; padding: 0 1rem; line-height: 1.45; color: #1d1d1f; }
+  h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+  .lede { margin-top: 0; color: #444; }
+  .lang { float: right; margin-top: .3rem; }
+  label { font-weight: 600; display: block; margin-top: 1rem; }
+  .lang label, .row label { display: inline; font-weight: normal; margin: 0; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 9rem; font: inherit; padding: .5rem; }
+  .row { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-top: .75rem; }
+  button, select { font: inherit; padding: .45rem 1.1rem; cursor: pointer; }
+  select { padding: .2rem .4rem; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+  th, td { border: 1px solid #ccc; padding: .4rem .5rem; text-align: left; vertical-align: top; }
+  th { background: #f3f3f3; }
+  .tag { display: inline-block; padding: .05rem .45rem; border-radius: .3rem; font-size: .9em; white-space: nowrap; }
+  .exact { background: #d9f2df; }
+  .punctuation_or_whitespace { background: #e6eefc; }
+  .altered { background: #fde7c8; }
+  .not_found { background: #f9d4d4; }
+  .note { color: #555; font-size: .92em; }
+  footer { margin-top: 2rem; color: #555; font-size: .9em; }
+</style>
+</head>
+<body>
+<div class="lang">
+  <label for="lang">Language / Idioma</label>
+  <select id="lang">
+    <option value="en">English</option>
+    <option value="es">Español</option>
+  </select>
+</div>
+<h1 data-i18n="h1">Quote check</h1>
+<p class="lede" data-i18n="lede">When AI writing feedback quotes a student's sentence back to them, did it copy the student's words exactly, or quietly fix them? Paste the student's text and the feedback; every quoted passage in the feedback is checked against the student's text. Nothing leaves this page: it works offline and makes no network requests.</p>
+
+<label for="source" data-i18n="source_label">Student's text</label>
+<textarea id="source" spellcheck="false" data-i18n-ph="source_ph" placeholder="Paste the student's essay or paragraph here."></textarea>
+
+<label for="feedback" data-i18n="feedback_label">AI feedback (or one quote per line)</label>
+<textarea id="feedback" spellcheck="false" data-i18n-ph="feedback_ph" placeholder='Paste the feedback here. Passages in "double quotes", &#8220;curly quotes&#8221;, &#171;guillemets&#187; or &#8222;low-high quotes&#8220; are checked.'></textarea>
+
+<div class="row">
+  <label><input type="checkbox" id="lines"> <span data-i18n="lines_label">Each line of the box is one quote (no quotation marks needed)</span></label>
+  <label><span data-i18n="threshold_label">Threshold for "changed words"</span> <input type="number" id="threshold" min="0" max="1" step="0.05" value="0.6" style="width:5rem"></label>
+  <button type="button" id="run" data-i18n="run">Check quotes</button>
+</div>
+
+<div id="out" aria-live="polite"></div>
+
+<details>
+  <summary data-i18n="verdicts_summary">What the verdicts mean</summary>
+  <ul>
+    <li><span class="tag exact" data-i18n="v_exact">Exact</span> <span data-i18n="d_exact">the quote appears character for character in the student's text.</span></li>
+    <li><span class="tag punctuation_or_whitespace" data-i18n="v_punct">Same words</span> <span data-i18n="d_punct">every word matches, in order; only punctuation, spacing or capital letters differ.</span></li>
+    <li><span class="tag altered" data-i18n="v_altered">Changed words</span> <span data-i18n="d_altered">the quote is close to a passage of the student's text, but words were added, dropped or changed (for example a misspelling silently corrected). The passage the student actually wrote is shown next to it.</span></li>
+    <li><span class="tag not_found" data-i18n="v_not_found">Not found</span> <span data-i18n="d_not_found">no passage of the student's text is close enough (word similarity below the threshold).</span></li>
+  </ul>
+  <p class="note" data-i18n="note">Similarity is the word-level match ratio (0 to 1) between the quote and the closest passage, the same measure Python's difflib uses. Single quotation marks are not treated as quote marks, because they double as apostrophes; use "one quote per line" for those. This is a mechanical check of copying, not a judgement of the feedback's quality.</p>
+</details>
+
+<footer>
+  <span data-i18n="footer_text">Quote check by MV2 of Munim, Inc. Made with AI agents working in his name. Apache-2.0. The same checker for the command line and Python, and the preregistered studies behind it:</span>
+  <a href="https://github.com/munimtechnologies/feedback-commons" rel="noopener">github.com/munimtechnologies/feedback-commons</a>.
+</footer>
+
+<!-- QC-CORE -->
+
+<script id="qc-text">
+// Interface text in English and Spanish, and the summary line. No DOM use here, so
+// node_test_i18n.mjs can check it under Node. The Spanish text was translated with AI.
+var QT = (function () {
+  "use strict";
+  var STRINGS = {
+    en: {
+      title: "Quote check: does AI feedback quote the student's words faithfully?",
+      h1: "Quote check",
+      lede: "When AI writing feedback quotes a student's sentence back to them, did it copy the student's words exactly, or quietly fix them? Paste the student's text and the feedback; every quoted passage in the feedback is checked against the student's text. Nothing leaves this page: it works offline and makes no network requests.",
+      source_label: "Student's text",
+      source_ph: "Paste the student's essay or paragraph here.",
+      feedback_label: "AI feedback (or one quote per line)",
+      feedback_ph: "Paste the feedback here. Passages in \"double quotes\", “curly quotes”, «guillemets» or „low-high quotes“ are checked.",
+      lines_label: "Each line of the box is one quote (no quotation marks needed)",
+      threshold_label: "Threshold for \"changed words\"",
+      run: "Check quotes",
+      verdicts_summary: "What the verdicts mean",
+      v_exact: "Exact",
+      v_punct: "Same words",
+      v_altered: "Changed words",
+      v_not_found: "Not found",
+      d_exact: "the quote appears character for character in the student's text.",
+      d_punct: "every word matches, in order; only punctuation, spacing or capital letters differ.",
+      d_altered: "the quote is close to a passage of the student's text, but words were added, dropped or changed (for example a misspelling silently corrected). The passage the student actually wrote is shown next to it.",
+      d_not_found: "no passage of the student's text is close enough (word similarity below the threshold).",
+      note: "Similarity is the word-level match ratio (0 to 1) between the quote and the closest passage, the same measure Python's difflib uses. Single quotation marks are not treated as quote marks, because they double as apostrophes; use \"one quote per line\" for those. This is a mechanical check of copying, not a judgement of the feedback's quality.",
+      footer_text: "Quote check by MV2 of Munim, Inc. Made with AI agents working in his name. Apache-2.0. The same checker for the command line and Python, and the preregistered studies behind it:",
+      th_n: "#",
+      th_quote: "Quote in the feedback",
+      th_verdict: "Verdict",
+      th_sim: "Similarity",
+      th_wrote: "What the student actually wrote",
+      msg_no_source: "Paste the student's text first.",
+      msg_no_lines: "No quotes found: the feedback box is empty.",
+      msg_no_quotes: "No quoted passages found in the feedback. If it quotes with single quotes or none, tick \"Each line of the box is one quote\" and paste one quote per line.",
+      summary_one: "{n} quote checked: {faithful} keep the student's words ({exact} exact, {same} same words), {altered} changed words, {not_found} not found.",
+      summary_other: "{n} quotes checked: {faithful} keep the student's words ({exact} exact, {same} same words), {altered} changed words, {not_found} not found."
+    },
+    es: {
+      title: "Revisión de citas: ¿la retroalimentación de la IA cita fielmente las palabras del estudiante?",
+      h1: "Revisión de citas",
+      lede: "Cuando una retroalimentación de escritura hecha con IA le cita al estudiante una de sus frases, ¿copió sus palabras exactamente o las corrigió sin avisar? Pegue el texto del estudiante y la retroalimentación: cada pasaje citado en la retroalimentación se compara con el texto del estudiante. Nada sale de esta página: funciona sin conexión y no hace ninguna petición de red.",
+      source_label: "Texto del estudiante",
+      source_ph: "Pegue aquí la redacción o el párrafo del estudiante.",
+      feedback_label: "Retroalimentación de la IA (o una cita por línea)",
+      feedback_ph: "Pegue aquí la retroalimentación. Se revisan los pasajes entre \"comillas dobles\", “comillas curvas”, «comillas angulares» o „comillas bajas“.",
+      lines_label: "Cada línea del cuadro es una cita (no hacen falta comillas)",
+      threshold_label: "Umbral para \"palabras cambiadas\"",
+      run: "Revisar citas",
+      verdicts_summary: "Qué significa cada resultado",
+      v_exact: "Exacta",
+      v_punct: "Mismas palabras",
+      v_altered: "Palabras cambiadas",
+      v_not_found: "No encontrada",
+      d_exact: "la cita aparece carácter por carácter en el texto del estudiante.",
+      d_punct: "todas las palabras coinciden y en el mismo orden; solo cambian la puntuación, los espacios o las mayúsculas.",
+      d_altered: "la cita se parece a un pasaje del texto del estudiante, pero se añadieron, quitaron o cambiaron palabras (por ejemplo, una falta de ortografía corregida sin avisar). Al lado se muestra el pasaje que el estudiante escribió de verdad.",
+      d_not_found: "ningún pasaje del texto del estudiante se parece lo suficiente (similitud de palabras por debajo del umbral).",
+      note: "La similitud es la proporción de palabras coincidentes (de 0 a 1) entre la cita y el pasaje más parecido, la misma medida que usa difflib de Python. Las comillas simples no se tratan como comillas, porque también sirven de apóstrofo; para esos casos use \"una cita por línea\". Es una comprobación mecánica de la copia, no un juicio sobre la calidad de la retroalimentación.",
+      footer_text: "Revisión de citas, de MV2 de Munim, Inc. Hecha con agentes de IA que trabajan en su nombre; traducción al español hecha con IA. Apache-2.0. El mismo verificador para la línea de comandos y Python, y los estudios prerregistrados que lo respaldan:",
+      th_n: "#",
+      th_quote: "Cita en la retroalimentación",
+      th_verdict: "Resultado",
+      th_sim: "Similitud",
+      th_wrote: "Lo que el estudiante escribió de verdad",
+      msg_no_source: "Primero pegue el texto del estudiante.",
+      msg_no_lines: "No se encontraron citas: el cuadro de retroalimentación está vacío.",
+      msg_no_quotes: "No se encontraron pasajes citados en la retroalimentación. Si cita con comillas simples o sin comillas, marque \"Cada línea del cuadro es una cita\" y pegue una cita por línea.",
+      summary_one: "{n} cita revisada. Con las palabras del estudiante: {faithful} (exactas: {exact}; mismas palabras: {same}). Con palabras cambiadas: {altered}. No encontradas: {not_found}.",
+      summary_other: "{n} citas revisadas. Con las palabras del estudiante: {faithful} (exactas: {exact}; mismas palabras: {same}). Con palabras cambiadas: {altered}. No encontradas: {not_found}."
+    }
+  };
+
+  // First supported language in the browser's preference list ("es-MX" -> "es"); else English.
+  function pick(langs) {
+    for (var i = 0; i < (langs || []).length; i++) {
+      if (typeof langs[i] !== "string") continue;
+      var base = langs[i].toLowerCase().split("-")[0];
+      if (Object.prototype.hasOwnProperty.call(STRINGS, base)) return base;
+    }
+    return "en";
+  }
+
+  function fill(template, values) {
+    return template.replace(/\{(\w+)\}/g, function (m, k) {
+      return Object.prototype.hasOwnProperty.call(values, k) ? String(values[k]) : m;
+    });
+  }
+
+  // Text for `key` in `lang`, falling back to English.
+  function t(lang, key, values) {
+    var table = Object.prototype.hasOwnProperty.call(STRINGS, lang) ? STRINGS[lang] : STRINGS.en;
+    var s = Object.prototype.hasOwnProperty.call(table, key) ? table[key] : STRINGS.en[key];
+    return values ? fill(s, values) : s;
+  }
+
+  // The line above the results table; counts are keyed by QC category.
+  function summary(lang, counts) {
+    var n = counts.exact + counts.punctuation_or_whitespace + counts.altered + counts.not_found;
+    return t(lang, n === 1 ? "summary_one" : "summary_other", {
+      n: n, faithful: counts.exact + counts.punctuation_or_whitespace, exact: counts.exact,
+      same: counts.punctuation_or_whitespace, altered: counts.altered, not_found: counts.not_found
+    });
+  }
+
+  return { STRINGS: STRINGS, pick: pick, t: t, summary: summary };
+})();
+</script>
+
+<script>
+(function () {
+  "use strict";
+  var LABELS = {
+    exact: "v_exact",
+    punctuation_or_whitespace: "v_punct",
+    altered: "v_altered",
+    not_found: "v_not_found"
+  };
+  var lang = QT.pick(navigator.languages || [navigator.language]);
+  var shown = false;
+
+  function t(key, values) {
+    return QT.t(lang, key, values);
+  }
+
+  function cell(row, text, cls) {
+    var td = document.createElement("td");
+    if (cls) {
+      var span = document.createElement("span");
+      span.className = "tag " + cls;
+      span.textContent = text;
+      td.appendChild(span);
+    } else {
+      td.textContent = text;
+    }
+    row.appendChild(td);
+  }
+
+  function run() {
+    shown = true;
+    var out = document.getElementById("out");
+    out.textContent = "";
+    var source = document.getElementById("source").value;
+    var feedback = document.getElementById("feedback").value;
+    var byLine = document.getElementById("lines").checked;
+    var threshold = parseFloat(document.getElementById("threshold").value);
+    if (!(threshold >= 0 && threshold <= 1)) threshold = 0.6;
+
+    var p = document.createElement("p");
+    out.appendChild(p);
+    if (!source.trim()) { p.textContent = t("msg_no_source"); return; }
+    var quotes = byLine ? QC.quoteLines(feedback) : QC.extractQuotes(feedback);
+    if (!quotes.length) {
+      p.textContent = byLine ? t("msg_no_lines") : t("msg_no_quotes");
+      return;
+    }
+
+    var counts = { exact: 0, punctuation_or_whitespace: 0, altered: 0, not_found: 0 };
+    var table = document.createElement("table");
+    var head = document.createElement("tr");
+    ["th_n", "th_quote", "th_verdict", "th_sim", "th_wrote"].forEach(function (h) {
+      var th = document.createElement("th");
+      th.textContent = t(h);
+      head.appendChild(th);
+    });
+    table.appendChild(head);
+    quotes.forEach(function (q, i) {
+      var r = QC.check(source, q, threshold);
+      counts[r.category]++;
+      var row = document.createElement("tr");
+      cell(row, String(i + 1));
+      cell(row, QC.cleanQuote(q));
+      cell(row, t(LABELS[r.category]), r.category);
+      cell(row, r.similarity.toFixed(3));
+      cell(row, r.studentWrote === null ? "" : r.studentWrote);
+      table.appendChild(row);
+    });
+    p.textContent = QT.summary(lang, counts);
+    out.appendChild(table);
+  }
+
+  // Puts every interface text in the chosen language; results already shown are redone in it.
+  function applyLanguage() {
+    document.documentElement.lang = lang;
+    document.title = t("title");
+    var nodes = document.querySelectorAll("[data-i18n]");
+    for (var i = 0; i < nodes.length; i++) nodes[i].textContent = t(nodes[i].getAttribute("data-i18n"));
+    var boxes = document.querySelectorAll("[data-i18n-ph]");
+    for (var j = 0; j < boxes.length; j++) boxes[j].placeholder = t(boxes[j].getAttribute("data-i18n-ph"));
+    document.getElementById("lang").value = lang;
+    if (shown) run();
+  }
+
+  document.getElementById("run").addEventListener("click", run);
+  document.getElementById("lang").addEventListener("change", function (e) {
+    lang = QT.pick([e.target.value]);
+    applyLanguage();
+  });
+  applyLanguage();
+})();
+</script>
+</body>
+</html>
