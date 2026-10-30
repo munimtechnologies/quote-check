@@ -18,7 +18,7 @@ import unittest
 
 import build_page as bp
 
-CORE = '<script id="qc-core">\nvar QC = 1; //   　 odd spaces\r\n</script>'
+CORE = '<script id="qc-core">\nvar QC = 1; //   　 odd spaces\r\n</script>'
 BASE = "<html><body>old ui\n" + CORE + "\n<script>old()</script></body></html>"
 
 
@@ -43,6 +43,11 @@ class BuildTests(unittest.TestCase):
     def test_template_must_not_carry_its_own_core(self):
         with self.assertRaises(ValueError):
             bp.build(BASE, CORE + "<!-- QC-CORE -->")
+
+    def test_other_script_blocks_are_left_alone(self):
+        tpl = '<script id="qc-md">var QM = 2;</script>\n<!-- QC-CORE -->'
+        page = bp.build(BASE, tpl)
+        self.assertEqual(page, '<script id="qc-md">var QM = 2;</script>\n' + CORE)
 
 
 if __name__ == "__main__":

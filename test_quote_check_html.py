@@ -14,7 +14,8 @@
 """Static checks on quote-check.html: it is self-contained and cannot send student text anywhere.
 
 The checking logic itself is tested against the Python reference by parity.mjs (run under Node),
-and the English/Spanish interface text by node_test_i18n.mjs.
+the Markdown-aware reading against explain.py by md_parity.mjs, and the English/Spanish
+interface text by node_test_i18n.mjs.
 Made with AI agents working in MV2's name.
 """
 from __future__ import annotations
@@ -38,6 +39,7 @@ NETWORK_APIS = ["fetch(", "XMLHttpRequest", "WebSocket", "sendBeacon", "EventSou
                 "import(", "importScripts", "Worker(", "eval(", "new Function", "innerHTML",
                 "document.write", ".src", "location"]
 CORE_RE = re.compile(r'<script id="qc-core">[\s\S]*?</script>')
+NO_DOM_RE = re.compile(r"\b(document|window|navigator)\s*\.")
 
 
 class _Collect(HTMLParser):
@@ -109,9 +111,9 @@ class SelfContainedTests(unittest.TestCase):
             self.assertTrue((h or "").startswith("https://github.com/munimtechnologies/"), h)
 
     def test_scripts_are_inline_and_offline(self):
-        self.assertEqual(len(self.parsed.scripts), 3)
+        self.assertEqual(len(self.parsed.scripts), 4)
         self.assertEqual(sorted(str(a.get("id")) for a, _ in self.parsed.scripts),
-                         ["None", "qc-core", "qc-text"])
+                         ["None", "qc-core", "qc-md", "qc-text"])
         for attrs, body in self.parsed.scripts:
             self.assertNotIn("src", attrs)
             for api in NETWORK_APIS:
@@ -119,13 +121,16 @@ class SelfContainedTests(unittest.TestCase):
         self.assertNotIn("@import", self.text)
         self.assertNotIn("url(", self.text)
 
-    def test_core_and_text_blocks_have_no_dom(self):
-        core = self._script("qc-core")
-        self.assertIsNone(re.search(r"\b(document|window|navigator)\s*\.", core))
-        self.assertIn("var QC =", core)
-        text = self._script("qc-text")
-        self.assertIsNone(re.search(r"\b(document|window|navigator)\s*\.", text))
-        self.assertIn("var QT =", text)
+    def test_core_md_and_text_blocks_have_no_dom(self):
+        for script_id, name in (("qc-core", "var QC ="), ("qc-md", "var QM ="), ("qc-text", "var QT =")):
+            body = self._script(script_id)
+            self.assertIsNone(NO_DOM_RE.search(body), script_id)
+            self.assertIn(name, body)
+
+    def test_blocks_come_in_load_order(self):
+        order = [self.text.index('<script id="%s">' % s) for s in ("qc-core", "qc-md", "qc-text")]
+        self.assertEqual(order, sorted(order))
+        self.assertLess(order[-1], self.text.index("<script>\n"))
 
     def test_core_block_unchanged_from_v010(self):
         if not os.path.exists(BASE):
@@ -140,6 +145,14 @@ class SelfContainedTests(unittest.TestCase):
         ui = [b for a, b in self.parsed.scripts if a.get("id") is None][0]
         self.assertIn("textContent", ui)
         self.assertIn("QT.summary(", ui)
+        self.assertIn("QT.summaryMd(", ui)
+        self.assertIn("QM.verdict(", ui)
+
+    def test_markdown_mode_is_on_by_default(self):
+        boxes = [a for t, a in self.parsed.tags if t == "input" and a.get("id") == "md"]
+        self.assertEqual(len(boxes), 1)
+        self.assertEqual(boxes[0].get("type"), "checkbox")
+        self.assertIn("checked", boxes[0])
 
     def test_language_switch(self):
         html = [a for t, a in self.parsed.tags if t == "html"]
@@ -147,7 +160,7 @@ class SelfContainedTests(unittest.TestCase):
         options = [a.get("value") for t, a in self.parsed.tags if t == "option"]
         self.assertEqual(options, ["en", "es"])
         keys = [a.get("data-i18n") for t, a in self.parsed.tags if "data-i18n" in a]
-        self.assertGreaterEqual(len(keys), 15)
+        self.assertGreaterEqual(len(keys), 20)
         self.assertEqual(len(keys), len(set(keys)))
 
     def test_licence_and_disclosure(self):

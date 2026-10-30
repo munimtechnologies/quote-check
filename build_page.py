@@ -11,11 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Build quote-check.html v0.2.0: the new interface around v0.1.0's checking code, byte for byte.
+"""Build quote-check.html: the current interface around v0.1.0's checking code, byte for byte.
 
 The checking logic (<script id="qc-core">) is cut from the released v0.1.0 page and put where the
 template says <!-- QC-CORE -->, so the parity tests against the Python reference still describe
-exactly the code teachers run. Made with AI agents working in MV2's name.
+exactly the code teachers run. Unchanged since v0.2.0. Made with AI agents working in MV2's name.
 
     python build_page.py --base quote-check-v010.html --template page-template.html \
         --out quote-check.html [--copy-to /out/quote-check.html]

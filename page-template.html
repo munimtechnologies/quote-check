@@ -17,6 +17,9 @@
   Quote check: does AI writing feedback quote the student's words faithfully?
   By MV2 of Munim, Inc. Made with AI agents working in his name.
   v0.2.0: the page can be shown in English or Spanish (Spanish text translated with AI).
+  v0.3.0: Markdown-aware mode (on by default): bold and italics, curly quotes, spacing,
+  punctuation at a quote's ends and capitals are set aside, "..." inside a quote is read as
+  words left out, and a change shown in bold or italics is labelled as a marked change.
 
   One self-contained page. It never loads or sends anything: the Content-Security-Policy
   below blocks every network request, so student text stays on this computer.
@@ -24,6 +27,8 @@
   verbatim_quote_check.py from github.com/munimtechnologies/feedback-commons (tools/),
   including Python difflib's SequenceMatcher.ratio, so both give the same answers.
   That block is copied byte for byte from v0.1.0 by build_page.py; only the interface changed.
+  The Markdown-aware reading (script id="qc-md") is a port of explain.py from
+  github.com/munimtechnologies/feedback-quote-audit (audit 1b), checked against it by md_parity.mjs.
 -->
 <html lang="en">
 <head>
@@ -47,7 +52,9 @@
   th { background: #f3f3f3; }
   .tag { display: inline-block; padding: .05rem .45rem; border-radius: .3rem; font-size: .9em; white-space: nowrap; }
   .exact { background: #d9f2df; }
-  .punctuation_or_whitespace { background: #e6eefc; }
+  .punctuation_or_whitespace, .same_words { background: #e6eefc; }
+  .left_out { background: #eae3f7; }
+  .marked { background: #fff3b8; }
   .altered { background: #fde7c8; }
   .not_found { background: #f9d4d4; }
   .note { color: #555; font-size: .92em; }
@@ -72,6 +79,9 @@
 <textarea id="feedback" spellcheck="false" data-i18n-ph="feedback_ph" placeholder='Paste the feedback here. Passages in "double quotes", &#8220;curly quotes&#8221;, &#171;guillemets&#187; or &#8222;low-high quotes&#8220; are checked.'></textarea>
 
 <div class="row">
+  <label><input type="checkbox" id="md" checked> <span data-i18n="md_label">Markdown-aware: set aside bold, italics and punctuation at a quote's ends, and read an ellipsis (...) as words left out</span></label>
+</div>
+<div class="row">
   <label><input type="checkbox" id="lines"> <span data-i18n="lines_label">Each line of the box is one quote (no quotation marks needed)</span></label>
   <label><span data-i18n="threshold_label">Threshold for "changed words"</span> <input type="number" id="threshold" min="0" max="1" step="0.05" value="0.6" style="width:5rem"></label>
   <button type="button" id="run" data-i18n="run">Check quotes</button>
@@ -84,10 +94,13 @@
   <ul>
     <li><span class="tag exact" data-i18n="v_exact">Exact</span> <span data-i18n="d_exact">the quote appears character for character in the student's text.</span></li>
     <li><span class="tag punctuation_or_whitespace" data-i18n="v_punct">Same words</span> <span data-i18n="d_punct">every word matches, in order; only punctuation, spacing or capital letters differ.</span></li>
+    <li><span class="tag left_out" data-i18n="v_left_out">Same words, some left out</span> <span data-i18n="d_left_out">Markdown-aware mode only: the quote uses an ellipsis (...) to leave words out, and every piece is the student's words, in order.</span></li>
+    <li><span class="tag marked" data-i18n="v_marked">Changed words, marked</span> <span data-i18n="d_marked">Markdown-aware mode only: words were changed, and the quote shows bold or italics, which usually marks a correction the reader is meant to see.</span></li>
     <li><span class="tag altered" data-i18n="v_altered">Changed words</span> <span data-i18n="d_altered">the quote is close to a passage of the student's text, but words were added, dropped or changed (for example a misspelling silently corrected). The passage the student actually wrote is shown next to it.</span></li>
     <li><span class="tag not_found" data-i18n="v_not_found">Not found</span> <span data-i18n="d_not_found">no passage of the student's text is close enough (word similarity below the threshold).</span></li>
   </ul>
   <p class="note" data-i18n="note">Similarity is the word-level match ratio (0 to 1) between the quote and the closest passage, the same measure Python's difflib uses. Single quotation marks are not treated as quote marks, because they double as apostrophes; use "one quote per line" for those. This is a mechanical check of copying, not a judgement of the feedback's quality.</p>
+  <p class="note" data-i18n="note_md">Why Markdown-aware: in MV2's audit of 50,742 quotes in published AI feedback on IELTS essays, only 37.7% were character-exact, but 95.7% kept the student's words once formatting and ellipses were set aside. Changed words were most common in short quotes of 4 to 6 words, and some of those are suggested phrasing rather than the student's words, so read short changed quotes first.</p>
 </details>
 
 <footer>
@@ -96,6 +109,170 @@
 </footer>
 
 <!-- QC-CORE -->
+
+<script id="qc-md">
+// Markdown-aware reading of one quote: a port of explain.py's first_step and explain from
+// feedback-quote-audit (audit 1b, commit d298ed9). No DOM use here, so md_parity.mjs can run this
+// block under Node against the Python reference. Uses QC from qc-core.
+var QM = (function () {
+  "use strict";
+  var STEPS = ["exact", "emphasis", "typography", "spacing", "edges", "case", "elision"];
+
+  // Python's \s on str (the characters str.isspace accepts); JavaScript's \s is a different set.
+  var S = "\\t\\n\\u000b\\u000c\\r\\u001c-\\u001f \\u0085\\u00a0\\u1680\\u2000-\\u200a" +
+    "\\u2028\\u2029\\u202f\\u205f\\u3000";
+  var SPACE_RUN_RE = new RegExp("[" + S + "]+", "gu");
+  var TRIM_RE = new RegExp("^[" + S + "]+|[" + S + "]+$", "gu");
+  var BEFORE_CLOSE_RE = / (?=[,.;:!?)\]])/gu;
+  var AFTER_OPEN_RE = /([(\[]) /gu;
+  var AFTER_MARK_RE = new RegExp("([,;:!?])(?=[^" + S + "\\p{Nd},;:!?.)\\]'\"])", "gu");
+  // '...', '. . .', '[...]' or the single ellipsis character, with any spaces around it.
+  var ELLIPSIS_RE = new RegExp("[" + S + "]*(?:\\[[" + S + "]*(?:\\.[" + S + "]*){3,}\\]|" +
+    "(?:\\.[" + S + "]*){3,}|\\u2026)[" + S + "]*", "u");
+  var EMPHASIS_RE = /\*+|__+/g;
+  var TYPOGRAPHY_RE = /[’‘ʼ`´“”„«»…–—]/g;
+  var TYPOGRAPHY = {
+    "’": "'", "‘": "'", "ʼ": "'", "`": "'", "´": "'",
+    "“": "\"", "”": "\"", "„": "\"", "«": "\"", "»": "\"",
+    "…": "...", "–": "-", "—": "-"
+  };
+  var EDGE = " .,;:!?'\"()[]-";
+
+  function stripChars(s, chars) {
+    var a = 0;
+    var b = s.length;
+    while (a < b && chars.indexOf(s.charAt(a)) !== -1) a++;
+    while (b > a && chars.indexOf(s.charAt(b - 1)) !== -1) b--;
+    return s.slice(a, b);
+  }
+
+  function typography(x) {
+    return x.replace(TYPOGRAPHY_RE, function (c) { return TYPOGRAPHY[c]; });
+  }
+
+  // Close to Python's str.casefold(): "ß" -> "ss", final "ς" -> "σ", and dotless "ı" kept apart
+  // from "i" (lower-upper-lower alone would merge them). Rare scripts may still differ.
+  function casefold(x) {
+    return x.replace(/[^ı]+/g, function (s) { return s.toLowerCase().toUpperCase().toLowerCase(); })
+      .replace(/ς/g, "σ");
+  }
+
+  // One space between words, none before , . ; : ! ? ) ] or after ( [, one after , ; : ! ?
+  function spacing(x) {
+    x = x.replace(SPACE_RUN_RE, " ");
+    x = x.replace(BEFORE_CLOSE_RE, "");
+    x = x.replace(AFTER_OPEN_RE, "$1");
+    x = x.replace(AFTER_MARK_RE, "$1 ");
+    return x.replace(TRIM_RE, "");
+  }
+
+  // The text after steps 1-3, cumulatively: [raw, emphasis, typography, spacing].
+  function forms(text) {
+    var t1 = text.replace(EMPHASIS_RE, "");
+    var t2 = typography(t1);
+    return [text, t1, t2, spacing(t2)];
+  }
+
+  function essayForms(essay) {
+    var f = forms(essay);
+    return f.concat([f[3], casefold(f[3])]);
+  }
+
+  function quoteForms(quote) {
+    var f = forms(QC.cleanQuote(quote));
+    var edges = stripChars(f[3], EDGE);
+    return f.concat([edges, casefold(edges)]);
+  }
+
+  // Pieces of a quote between ellipses, ends stripped, empty pieces dropped.
+  function fragments(text) {
+    return text.split(ELLIPSIS_RE).map(function (p) { return stripChars(p, EDGE); })
+      .filter(function (p) { return p !== ""; });
+  }
+
+  function inOrder(pieces, text) {
+    if (!pieces.length) return false;
+    var pos = 0;
+    for (var i = 0; i < pieces.length; i++) {
+      var at = text.indexOf(pieces[i], pos);
+      if (at < 0) return false;
+      pos = at + pieces[i].length;
+    }
+    return true;
+  }
+
+  // Every piece is a contiguous run of srcWords, the runs in order and not overlapping.
+  function wordsInOrder(pieces, srcWords) {
+    if (!pieces.length) return false;
+    var pos = 0;
+    for (var p = 0; p < pieces.length; p++) {
+      var piece = pieces[p];
+      var m = piece.length;
+      var found = false;
+      for (var i = pos; i <= srcWords.length - m; i++) {
+        var ok = true;
+        for (var k = 0; k < m; k++) {
+          if (srcWords[i + k] !== piece[k]) { ok = false; break; }
+        }
+        if (ok) { pos = i + m; found = true; break; }
+      }
+      if (!found) return false;
+    }
+    return true;
+  }
+
+  function firstStep(quote, eforms) {
+    var qf = quoteForms(quote);
+    for (var k = 0; k < 6; k++) {
+      if (qf[k] && eforms[k].indexOf(qf[k]) !== -1) return k;
+    }
+    var pieces = fragments(qf[5]);
+    if (pieces.length > 1 && inOrder(pieces, eforms[5])) return 6;
+    return null;
+  }
+
+  // Same class, elided and emphasis as explain.explain(); `check` is QC.check's result and
+  // `pieces` the quote's words between ellipses.
+  function explain(source, quote, threshold) {
+    var base = QC.check(source, quote, threshold);
+    var plain = typography(QC.cleanQuote(quote));
+    var pieces = plain.split(ELLIPSIS_RE).map(function (p) { return QC.words(p); })
+      .filter(function (w) { return w.length > 0; });
+    var elided = pieces.length > 1;
+    EMPHASIS_RE.lastIndex = 0;
+    var emphasis = EMPHASIS_RE.test(quote);
+    EMPHASIS_RE.lastIndex = 0;
+    var k = firstStep(quote, essayForms(source));
+    var cls;
+    if (k !== null) cls = STEPS[k];
+    else if (base.category === QC.EXACT || base.category === QC.PUNCT_WHITESPACE) cls = "other_punctuation";
+    else if (elided && wordsInOrder(pieces, QC.words(source))) cls = "elision_words";
+    else cls = "word_changed";
+    return { cls: cls, elided: elided, emphasis: emphasis, check: base, pieces: pieces };
+  }
+
+  // The page's verdict. Unlike explain.py it trusts a formatting step only when the words also
+  // match, so a quote found only inside a longer word ("he went" in "she went") is not "same words".
+  function verdict(source, quote, threshold) {
+    var r = explain(source, quote, threshold);
+    var c = r.check.category;
+    var v;
+    if (r.cls === "exact") v = "exact";
+    else if (c === QC.EXACT || c === QC.PUNCT_WHITESPACE) v = "same_words";
+    else if (r.elided && wordsInOrder(r.pieces, QC.words(source))) v = "left_out";
+    else if (c === QC.NOT_FOUND) v = "not_found";
+    else v = r.emphasis ? "marked" : "altered";
+    var why = "";
+    if (v === "left_out") why = "elision";
+    else if (v === "same_words") why = r.cls === "elision" || r.cls === "elision_words" ? "elision" : r.cls;
+    else if (v === "marked") why = "marked";
+    return { verdict: v, why: why, cls: r.cls, check: r.check };
+  }
+
+  return { STEPS: STEPS, explain: explain, verdict: verdict, casefold: casefold, spacing: spacing,
+           fragments: fragments, wordsInOrder: wordsInOrder };
+})();
+</script>
 
 <script id="qc-text">
 // Interface text in English and Spanish, and the summary line. No DOM use here, so
@@ -111,30 +288,47 @@ var QT = (function () {
       source_ph: "Paste the student's essay or paragraph here.",
       feedback_label: "AI feedback (or one quote per line)",
       feedback_ph: "Paste the feedback here. Passages in \"double quotes\", “curly quotes”, «guillemets» or „low-high quotes“ are checked.",
+      md_label: "Markdown-aware: set aside bold, italics and punctuation at a quote's ends, and read an ellipsis (...) as words left out",
       lines_label: "Each line of the box is one quote (no quotation marks needed)",
       threshold_label: "Threshold for \"changed words\"",
       run: "Check quotes",
       verdicts_summary: "What the verdicts mean",
       v_exact: "Exact",
       v_punct: "Same words",
+      v_left_out: "Same words, some left out",
+      v_marked: "Changed words, marked",
       v_altered: "Changed words",
       v_not_found: "Not found",
       d_exact: "the quote appears character for character in the student's text.",
       d_punct: "every word matches, in order; only punctuation, spacing or capital letters differ.",
+      d_left_out: "Markdown-aware mode only: the quote uses an ellipsis (...) to leave words out, and every piece is the student's words, in order.",
+      d_marked: "Markdown-aware mode only: words were changed, and the quote shows bold or italics, which usually marks a correction the reader is meant to see.",
       d_altered: "the quote is close to a passage of the student's text, but words were added, dropped or changed (for example a misspelling silently corrected). The passage the student actually wrote is shown next to it.",
       d_not_found: "no passage of the student's text is close enough (word similarity below the threshold).",
       note: "Similarity is the word-level match ratio (0 to 1) between the quote and the closest passage, the same measure Python's difflib uses. Single quotation marks are not treated as quote marks, because they double as apostrophes; use \"one quote per line\" for those. This is a mechanical check of copying, not a judgement of the feedback's quality.",
+      note_md: "Why Markdown-aware: in MV2's audit of 50,742 quotes in published AI feedback on IELTS essays, only 37.7% were character-exact, but 95.7% kept the student's words once formatting and ellipses were set aside. Changed words were most common in short quotes of 4 to 6 words, and some of those are suggested phrasing rather than the student's words, so read short changed quotes first.",
       footer_text: "Quote check by MV2 of Munim, Inc. Made with AI agents working in his name. Apache-2.0. The same checker for the command line and Python, and the preregistered studies behind it:",
       th_n: "#",
       th_quote: "Quote in the feedback",
       th_verdict: "Verdict",
+      th_why: "Why not exact",
       th_sim: "Similarity",
       th_wrote: "What the student actually wrote",
+      why_emphasis: "bold or italics",
+      why_typography: "curly quotes or dashes",
+      why_spacing: "spacing",
+      why_edges: "punctuation or quote marks at the ends",
+      why_case: "capital letters",
+      why_elision: "words left out with an ellipsis",
+      why_other_punctuation: "other punctuation",
+      why_marked: "change shown in bold or italics",
       msg_no_source: "Paste the student's text first.",
       msg_no_lines: "No quotes found: the feedback box is empty.",
       msg_no_quotes: "No quoted passages found in the feedback. If it quotes with single quotes or none, tick \"Each line of the box is one quote\" and paste one quote per line.",
       summary_one: "{n} quote checked: {faithful} keep the student's words ({exact} exact, {same} same words), {altered} changed words, {not_found} not found.",
-      summary_other: "{n} quotes checked: {faithful} keep the student's words ({exact} exact, {same} same words), {altered} changed words, {not_found} not found."
+      summary_other: "{n} quotes checked: {faithful} keep the student's words ({exact} exact, {same} same words), {altered} changed words, {not_found} not found.",
+      summary_md_one: "{n} quote checked: {faithful} keep the student's words ({exact} exact, {same} same words, {left_out} with words left out), {marked} changed words marked in bold or italics, {altered} changed words not marked, {not_found} not found.",
+      summary_md_other: "{n} quotes checked: {faithful} keep the student's words ({exact} exact, {same} same words, {left_out} with words left out), {marked} changed words marked in bold or italics, {altered} changed words not marked, {not_found} not found."
     },
     es: {
       title: "Revisión de citas: ¿la retroalimentación de la IA cita fielmente las palabras del estudiante?",
@@ -144,30 +338,47 @@ var QT = (function () {
       source_ph: "Pegue aquí la redacción o el párrafo del estudiante.",
       feedback_label: "Retroalimentación de la IA (o una cita por línea)",
       feedback_ph: "Pegue aquí la retroalimentación. Se revisan los pasajes entre \"comillas dobles\", “comillas curvas”, «comillas angulares» o „comillas bajas“.",
+      md_label: "Modo Markdown: no tener en cuenta la negrita, la cursiva ni la puntuación en los extremos de la cita, y leer los puntos suspensivos (...) como palabras omitidas",
       lines_label: "Cada línea del cuadro es una cita (no hacen falta comillas)",
       threshold_label: "Umbral para \"palabras cambiadas\"",
       run: "Revisar citas",
       verdicts_summary: "Qué significa cada resultado",
       v_exact: "Exacta",
       v_punct: "Mismas palabras",
+      v_left_out: "Mismas palabras, con omisiones",
+      v_marked: "Palabras cambiadas, marcadas",
       v_altered: "Palabras cambiadas",
       v_not_found: "No encontrada",
       d_exact: "la cita aparece carácter por carácter en el texto del estudiante.",
       d_punct: "todas las palabras coinciden y en el mismo orden; solo cambian la puntuación, los espacios o las mayúsculas.",
+      d_left_out: "solo en modo Markdown: la cita usa puntos suspensivos (...) para omitir palabras, y cada fragmento son palabras del estudiante, en el mismo orden.",
+      d_marked: "solo en modo Markdown: se cambiaron palabras y la cita lleva negrita o cursiva, lo que suele indicar una corrección que el lector debe ver.",
       d_altered: "la cita se parece a un pasaje del texto del estudiante, pero se añadieron, quitaron o cambiaron palabras (por ejemplo, una falta de ortografía corregida sin avisar). Al lado se muestra el pasaje que el estudiante escribió de verdad.",
       d_not_found: "ningún pasaje del texto del estudiante se parece lo suficiente (similitud de palabras por debajo del umbral).",
       note: "La similitud es la proporción de palabras coincidentes (de 0 a 1) entre la cita y el pasaje más parecido, la misma medida que usa difflib de Python. Las comillas simples no se tratan como comillas, porque también sirven de apóstrofo; para esos casos use \"una cita por línea\". Es una comprobación mecánica de la copia, no un juicio sobre la calidad de la retroalimentación.",
+      note_md: "Por qué el modo Markdown: en la auditoría de MV2 de 50.742 citas en retroalimentación publicada hecha con IA sobre redacciones del IELTS, solo el 37,7 % eran exactas carácter por carácter, pero el 95,7 % conservaban las palabras del estudiante al dejar de lado el formato y los puntos suspensivos. Las palabras cambiadas eran más frecuentes en citas cortas de 4 a 6 palabras, y algunas son redacciones sugeridas y no palabras del estudiante, así que revise primero las citas cortas con palabras cambiadas.",
       footer_text: "Revisión de citas, de MV2 de Munim, Inc. Hecha con agentes de IA que trabajan en su nombre; traducción al español hecha con IA. Apache-2.0. El mismo verificador para la línea de comandos y Python, y los estudios prerregistrados que lo respaldan:",
       th_n: "#",
       th_quote: "Cita en la retroalimentación",
       th_verdict: "Resultado",
+      th_why: "Por qué no es exacta",
       th_sim: "Similitud",
       th_wrote: "Lo que el estudiante escribió de verdad",
+      why_emphasis: "negrita o cursiva",
+      why_typography: "comillas curvas o rayas",
+      why_spacing: "espacios",
+      why_edges: "puntuación o comillas en los extremos",
+      why_case: "mayúsculas",
+      why_elision: "palabras omitidas con puntos suspensivos",
+      why_other_punctuation: "otra puntuación",
+      why_marked: "cambio marcado en negrita o cursiva",
       msg_no_source: "Primero pegue el texto del estudiante.",
       msg_no_lines: "No se encontraron citas: el cuadro de retroalimentación está vacío.",
       msg_no_quotes: "No se encontraron pasajes citados en la retroalimentación. Si cita con comillas simples o sin comillas, marque \"Cada línea del cuadro es una cita\" y pegue una cita por línea.",
       summary_one: "{n} cita revisada. Con las palabras del estudiante: {faithful} (exactas: {exact}; mismas palabras: {same}). Con palabras cambiadas: {altered}. No encontradas: {not_found}.",
-      summary_other: "{n} citas revisadas. Con las palabras del estudiante: {faithful} (exactas: {exact}; mismas palabras: {same}). Con palabras cambiadas: {altered}. No encontradas: {not_found}."
+      summary_other: "{n} citas revisadas. Con las palabras del estudiante: {faithful} (exactas: {exact}; mismas palabras: {same}). Con palabras cambiadas: {altered}. No encontradas: {not_found}.",
+      summary_md_one: "{n} cita revisada. Con las palabras del estudiante: {faithful} (exactas: {exact}; mismas palabras: {same}; con palabras omitidas: {left_out}). Con palabras cambiadas y marcadas en negrita o cursiva: {marked}. Con palabras cambiadas sin marcar: {altered}. No encontradas: {not_found}.",
+      summary_md_other: "{n} citas revisadas. Con las palabras del estudiante: {faithful} (exactas: {exact}; mismas palabras: {same}; con palabras omitidas: {left_out}). Con palabras cambiadas y marcadas en negrita o cursiva: {marked}. Con palabras cambiadas sin marcar: {altered}. No encontradas: {not_found}."
     }
   };
 
@@ -203,7 +414,18 @@ var QT = (function () {
     });
   }
 
-  return { STRINGS: STRINGS, pick: pick, t: t, summary: summary };
+  // The same line in Markdown-aware mode; counts are keyed by QM verdict.
+  function summaryMd(lang, counts) {
+    var faithful = counts.exact + counts.same_words + counts.left_out;
+    var n = faithful + counts.marked + counts.altered + counts.not_found;
+    return t(lang, n === 1 ? "summary_md_one" : "summary_md_other", {
+      n: n, faithful: faithful, exact: counts.exact, same: counts.same_words,
+      left_out: counts.left_out, marked: counts.marked, altered: counts.altered,
+      not_found: counts.not_found
+    });
+  }
+
+  return { STRINGS: STRINGS, pick: pick, t: t, summary: summary, summaryMd: summaryMd };
 })();
 </script>
 
@@ -213,6 +435,9 @@ var QT = (function () {
   var LABELS = {
     exact: "v_exact",
     punctuation_or_whitespace: "v_punct",
+    same_words: "v_punct",
+    left_out: "v_left_out",
+    marked: "v_marked",
     altered: "v_altered",
     not_found: "v_not_found"
   };
@@ -243,6 +468,7 @@ var QT = (function () {
     var source = document.getElementById("source").value;
     var feedback = document.getElementById("feedback").value;
     var byLine = document.getElementById("lines").checked;
+    var md = document.getElementById("md").checked;
     var threshold = parseFloat(document.getElementById("threshold").value);
     if (!(threshold >= 0 && threshold <= 1)) threshold = 0.6;
 
@@ -255,27 +481,40 @@ var QT = (function () {
       return;
     }
 
-    var counts = { exact: 0, punctuation_or_whitespace: 0, altered: 0, not_found: 0 };
+    var counts = md
+      ? { exact: 0, same_words: 0, left_out: 0, marked: 0, altered: 0, not_found: 0 }
+      : { exact: 0, punctuation_or_whitespace: 0, altered: 0, not_found: 0 };
+    var heads = md ? ["th_n", "th_quote", "th_verdict", "th_why", "th_sim", "th_wrote"]
+      : ["th_n", "th_quote", "th_verdict", "th_sim", "th_wrote"];
     var table = document.createElement("table");
     var head = document.createElement("tr");
-    ["th_n", "th_quote", "th_verdict", "th_sim", "th_wrote"].forEach(function (h) {
+    heads.forEach(function (h) {
       var th = document.createElement("th");
       th.textContent = t(h);
       head.appendChild(th);
     });
     table.appendChild(head);
     quotes.forEach(function (q, i) {
-      var r = QC.check(source, q, threshold);
-      counts[r.category]++;
       var row = document.createElement("tr");
       cell(row, String(i + 1));
       cell(row, QC.cleanQuote(q));
-      cell(row, t(LABELS[r.category]), r.category);
+      var r;
+      if (md) {
+        var v = QM.verdict(source, q, threshold);
+        r = v.check;
+        counts[v.verdict]++;
+        cell(row, t(LABELS[v.verdict]), v.verdict);
+        cell(row, v.why ? t("why_" + v.why) : "");
+      } else {
+        r = QC.check(source, q, threshold);
+        counts[r.category]++;
+        cell(row, t(LABELS[r.category]), r.category);
+      }
       cell(row, r.similarity.toFixed(3));
       cell(row, r.studentWrote === null ? "" : r.studentWrote);
       table.appendChild(row);
     });
-    p.textContent = QT.summary(lang, counts);
+    p.textContent = md ? QT.summaryMd(lang, counts) : QT.summary(lang, counts);
     out.appendChild(table);
   }
 
@@ -292,6 +531,7 @@ var QT = (function () {
   }
 
   document.getElementById("run").addEventListener("click", run);
+  document.getElementById("md").addEventListener("change", function () { if (shown) run(); });
   document.getElementById("lang").addEventListener("change", function (e) {
     lang = QT.pick([e.target.value]);
     applyLanguage();
