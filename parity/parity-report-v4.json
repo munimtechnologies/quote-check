@@ -1,0 +1,35 @@
+{
+ "report": {
+  "node": "v20.19.2",
+  "reference": "verbatim_quote_check.py, feedback-commons tools/, tag v0.8.0",
+  "python": "3.12.15",
+  "python_unicode": "15.0.0",
+  "cases": 4160,
+  "sources": 13,
+  "by_category": {
+   "not_found": 1308,
+   "altered": 1014,
+   "exact": 1276,
+   "punctuation_or_whitespace": 562
+  },
+  "by_kind": {
+   "random": 624,
+   "replace": 320,
+   "multi": 328,
+   "nopunct": 336,
+   "drop": 322,
+   "joined": 319,
+   "insert": 318,
+   "nfd": 323,
+   "swap": 319,
+   "slice": 333,
+   "case": 273,
+   "edge": 345
+  },
+  "mismatches": 0,
+  "altered_without_span": 0,
+  "categories_never_exercised": [],
+  "ok": true
+ },
+ "first_mismatches": []
+}

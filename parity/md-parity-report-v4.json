@@ -1,0 +1,30 @@
+{
+ "cases": 4000,
+ "mismatches": 0,
+ "first_mismatches": [],
+ "by_class": {
+  "word_changed": 795,
+  "exact": 1159,
+  "edges": 332,
+  "typography": 73,
+  "spacing": 143,
+  "emphasis": 309,
+  "other_punctuation": 426,
+  "elision": 399,
+  "elision_words": 163,
+  "case": 201
+ },
+ "by_verdict": {
+  "not_found": 332,
+  "exact": 1159,
+  "marked": 133,
+  "same_words": 1485,
+  "left_out": 552,
+  "altered": 339
+ },
+ "python": "3.12.15",
+ "python_unicode": "15.0.0",
+ "node": "v20.19.2",
+ "node_unicode": "16.0",
+ "seed": "quote-check-v0.3.0-md-parity"
+}

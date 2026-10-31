@@ -5,10 +5,11 @@ student's words exactly, or quietly changed them. Paste the student's text and t
 every passage the feedback puts in quotation marks is checked against the student's text.
 The page can be shown in **English or Spanish** (Language / Idioma, top right).
 
-**Open it in your browser:** https://rawcdn.githack.com/munimtechnologies/quote-check/v0.3.0/quote-check.html
-(release v0.3.0 of this repository's `quote-check.html`, served as-is by the free raw.githack.com
+**Open it in your browser:** https://rawcdn.githack.com/munimtechnologies/quote-check/v0.4.0/quote-check.html
+(release v0.4.0 of this repository's `quote-check.html`, served as-is by the free raw.githack.com
 CDN; the CDN only delivers the page, and the page itself sends nothing anywhere, see Privacy).
-Earlier versions stay at the same address with `v0.2.0` or `v0.1.0` in place of `v0.3.0`.
+Earlier versions stay at the same address with `v0.3.0`, `v0.2.0` or `v0.1.0` in place of
+`v0.4.0`.
 
 By MV2 of Munim, Inc. Made with AI agents working in his name. Apache-2.0.
 
@@ -16,6 +17,34 @@ By MV2 of Munim, Inc. Made with AI agents working in his name. Apache-2.0.
 escritura hecha con IA cita las palabras del estudiante tal como las escribió. Abra el enlace de
 arriba y elija «Español» en «Language / Idioma» (se elige solo si el navegador está en español).
 La traducción al español se hizo con IA y aún no la ha revisado un docente.
+
+## What is new in v0.4.0: where to look first
+
+- A **Words** column gives each quote's length in words.
+- For every changed quote (**Changed words** or **Changed words, marked**) a **Where to look**
+  column counts how many words differ from the passage the student wrote (a swapped word counts
+  once). With 1 or 2 differing words it says to compare word by word; with 3 or more it says to
+  compare with the whole passage, because the quote may be reworded, or a suggested phrase rather
+  than the student's words.
+- A **Changed quotes first** box (off by default) moves unmarked changed quotes to the top, those
+  with the fewest differing words and then the fewest words first, then marked changes, then quotes
+  not found. Every row keeps its original number in the **#** column, so it can still be found in
+  the feedback.
+
+Why: audit 3 (RESULTS-3.md in
+[feedback-quote-audit](https://github.com/munimtechnologies/feedback-quote-audit)) found that close
+copies with one word changed, the quotes that look most like a real misquote, were mostly short
+(3.19% of close 4-6-word quotes against 0.74% of close quotes of 11 or more words), while two in
+three changed long quotes were loose matches. It also found that a fixed similarity cut means
+different things at different lengths: one changed word takes a 4-word quote below similarity 0.8.
+So this version counts differing words instead of labelling rows by similarity, and shows the
+length next to it. The 1-2 word cut is a reading aid chosen for this page, not an audit finding;
+only reading the quote can tell a misquote from a suggested phrase.
+
+The verdicts, the summary line, the similarity and the checking code are unchanged, and both parity
+checks were run again for this build (`parity/parity-report-v4.json`,
+`parity/md-parity-report-v4.json`). `node_test_order.mjs` runs the page's own interface script on a
+small stand-in for the browser to check the new columns and the order on made-up sentences.
 
 ## What is new in v0.3.0: Markdown-aware mode (on by default)
 
@@ -105,10 +134,11 @@ their SHA-256):
 ```bash
 sh setup.sh
 python build_page.py --base quote-check-v010.html --template page-template.html --out quote-check.html
-python -m unittest -v test_quote_check_html.py test_build_page.py
+python -m unittest -v test_quote_check_html.py test_build_page.py test_ui_v040.py
 node node_test.mjs quote-check.html
 node node_test_i18n.mjs quote-check.html
 node node_test_md.mjs quote-check.html
+node node_test_order.mjs quote-check.html
 python make_cases.py --out cases.json && node parity.mjs quote-check.html cases.json
 python make_md_cases.py --out cases-md.json && node md_parity.mjs quote-check.html cases-md.json
 ```
@@ -124,6 +154,8 @@ python make_md_cases.py --out cases-md.json && node md_parity.mjs quote-check.ht
   not found even if each half is exact.
 - The "what the student wrote" passage is the closest window of about the quote's length; when
   several windows tie, the first one is shown.
+- **Where to look** compares the quote with that closest passage, so when the passage is not the
+  one the feedback meant, the count is off too. The 1-2 word cut is a choice, not a measured line.
 - The page, its tests and its Spanish translation were made by AI agents and have not yet been
   reviewed by a teacher.
 

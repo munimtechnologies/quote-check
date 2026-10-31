@@ -20,6 +20,9 @@
   v0.3.0: Markdown-aware mode (on by default): bold and italics, curly quotes, spacing,
   punctuation at a quote's ends and capitals are set aside, "..." inside a quote is read as
   words left out, and a change shown in bold or italics is labelled as a marked change.
+  v0.4.0: a "Words" column; for changed quotes a "Where to look" column that counts the words
+  that differ from the student's passage (1-2: compare word by word; 3 or more: compare with the
+  whole passage); and a "Changed quotes first" box. Each row keeps its original number.
 
   One self-contained page. It never loads or sends anything: the Content-Security-Policy
   below blocks every network request, so student text stays on this computer.
@@ -82,6 +85,9 @@
   <label><input type="checkbox" id="md" checked> <span data-i18n="md_label">Markdown-aware: set aside bold, italics and punctuation at a quote's ends, and read an ellipsis (...) as words left out</span></label>
 </div>
 <div class="row">
+  <label><input type="checkbox" id="order"> <span data-i18n="order_label">Changed quotes first: unmarked changes with the fewest differing words at the top (each row keeps its number)</span></label>
+</div>
+<div class="row">
   <label><input type="checkbox" id="lines"> <span data-i18n="lines_label">Each line of the box is one quote (no quotation marks needed)</span></label>
   <label><span data-i18n="threshold_label">Threshold for "changed words"</span> <input type="number" id="threshold" min="0" max="1" step="0.05" value="0.6" style="width:5rem"></label>
   <button type="button" id="run" data-i18n="run">Check quotes</button>
@@ -101,6 +107,7 @@
   </ul>
   <p class="note" data-i18n="note">Similarity is the word-level match ratio (0 to 1) between the quote and the closest passage, the same measure Python's difflib uses. Single quotation marks are not treated as quote marks, because they double as apostrophes; use "one quote per line" for those. This is a mechanical check of copying, not a judgement of the feedback's quality.</p>
   <p class="note" data-i18n="note_md">Why Markdown-aware: in MV2's audit of 50,742 quotes in published AI feedback on IELTS essays, only 37.7% were character-exact, but 95.7% kept the student's words once formatting and ellipses were set aside. Changed words were most common in short quotes of 4 to 6 words, and some of those are suggested phrasing rather than the student's words, so read short changed quotes first.</p>
+  <p class="note" data-i18n="note_look">Where to look: in MV2's audit of the same IELTS feedback, close copies with a word changed were mostly in short quotes (3.19% of close 4-6-word quotes against 0.74% of close quotes of 11 or more words), and when long quotes changed, two in three were loose matches, more like a reworded passage than a one-word slip. So the page counts the words that differ: 1 or 2 reads as a close copy, 3 or more as a looser match. That cut is a reading aid, not a finding; only reading the quote tells a misquote from a suggested phrase.</p>
 </details>
 
 <footer>
@@ -473,7 +480,8 @@ var QM = (function () {
 </script>
 
 <script id="qc-text">
-// Interface text in English and Spanish, and the summary line. No DOM use here, so
+// Interface text in English and Spanish, the summary line, and v0.4.0's row helpers (differ,
+// look, order). No DOM use here, so
 // node_test_i18n.mjs can check it under Node. The Spanish text was translated with AI.
 var QT = (function () {
   "use strict";
@@ -511,6 +519,13 @@ var QT = (function () {
       th_verdict: "Verdict",
       th_why: "Why not exact",
       th_sim: "Similarity",
+      th_words: "Words",
+      th_look: "Where to look",
+      look_close_one: "1 word differs from what the student wrote: compare word by word.",
+      look_close_other: "{k} words differ from what the student wrote: compare word by word.",
+      look_loose: "{k} words differ: compare with the whole passage; it may be reworded, or a suggested phrase rather than the student's words.",
+      order_label: "Changed quotes first: unmarked changes with the fewest differing words at the top (each row keeps its number)",
+      note_look: "Where to look: in MV2's audit of the same IELTS feedback, close copies with a word changed were mostly in short quotes (3.19% of close 4-6-word quotes against 0.74% of close quotes of 11 or more words), and when long quotes changed, two in three were loose matches, more like a reworded passage than a one-word slip. So the page counts the words that differ: 1 or 2 reads as a close copy, 3 or more as a looser match. That cut is a reading aid, not a finding; only reading the quote tells a misquote from a suggested phrase.",
       th_wrote: "What the student actually wrote",
       why_emphasis: "bold or italics",
       why_typography: "curly quotes or dashes",
@@ -561,6 +576,13 @@ var QT = (function () {
       th_verdict: "Resultado",
       th_why: "Por qué no es exacta",
       th_sim: "Similitud",
+      th_words: "Palabras",
+      th_look: "Qué revisar",
+      look_close_one: "1 palabra difiere de lo que escribió el estudiante: compárela palabra por palabra.",
+      look_close_other: "{k} palabras difieren de lo que escribió el estudiante: compárelas palabra por palabra.",
+      look_loose: "{k} palabras difieren: compárela con el pasaje completo; puede estar reescrita o ser una frase sugerida y no palabras del estudiante.",
+      order_label: "Primero las citas cambiadas: arriba los cambios sin marcar con menos palabras distintas (cada fila conserva su número)",
+      note_look: "Qué revisar: en la auditoría de MV2 de la misma retroalimentación del IELTS, las copias casi exactas con una palabra cambiada estaban sobre todo en citas cortas (el 3,19 % de las copias casi exactas de 4 a 6 palabras frente al 0,74 % de las de 11 palabras o más), y cuando cambiaban citas largas, dos de cada tres eran coincidencias parciales, más parecidas a un pasaje reescrito que a un desliz de una palabra. Por eso la página cuenta las palabras que difieren: 1 o 2 se leen como copia casi exacta y 3 o más como coincidencia parcial. Ese corte es una ayuda para leer, no un resultado; solo leyendo la cita se distingue una cita errónea de una frase sugerida.",
       th_wrote: "Lo que el estudiante escribió de verdad",
       why_emphasis: "negrita o cursiva",
       why_typography: "comillas curvas o rayas",
@@ -623,7 +645,49 @@ var QT = (function () {
     });
   }
 
-  return { STRINGS: STRINGS, pick: pick, t: t, summary: summary, summaryMd: summaryMd };
+  // How many words differ between a changed quote and the passage the student wrote: the longer
+  // side's length minus the most words the two share in the same order (a swapped word counts once).
+  function differ(quoteWords, wroteWords) {
+    var a = quoteWords.length;
+    var b = wroteWords.length;
+    var prev = [];
+    for (var j = 0; j <= b; j++) prev.push(0);
+    for (var i = 1; i <= a; i++) {
+      var cur = [0];
+      for (var k = 1; k <= b; k++) {
+        cur.push(quoteWords[i - 1] === wroteWords[k - 1] ? prev[k - 1] + 1 : Math.max(prev[k], cur[k - 1]));
+      }
+      prev = cur;
+    }
+    return Math.max(a, b) - prev[b];
+  }
+
+  // The "Where to look" hint for a changed quote with n differing words: 1 or 2 read as a close
+  // copy, 3 or more as a looser match. A reading aid for this page, not an audit finding.
+  var CLOSE_MAX = 2;
+  function look(lang, n) {
+    if (!(n >= 1)) return "";
+    if (n === 1) return t(lang, "look_close_one");
+    return t(lang, n <= CLOSE_MAX ? "look_close_other" : "look_loose", { k: n });
+  }
+
+  // Row order for "Changed quotes first": unmarked changed quotes (fewest differing words, then
+  // fewest words, first), then marked ones, then not found, then the rest; ties keep the
+  // feedback's order. rows: [{ n, verdict, words, differ }]; returns a new array.
+  var RANK = { altered: 0, marked: 1, not_found: 2 };
+  function order(rows) {
+    function rank(r) {
+      return Object.prototype.hasOwnProperty.call(RANK, r.verdict) ? RANK[r.verdict] : 3;
+    }
+    return rows.slice().sort(function (x, y) {
+      var d = rank(x) - rank(y);
+      if (!d && rank(x) < 2) d = x.differ - y.differ || x.words - y.words;
+      return d || x.n - y.n;
+    });
+  }
+
+  return { STRINGS: STRINGS, pick: pick, t: t, summary: summary, summaryMd: summaryMd,
+           differ: differ, look: look, order: order };
 })();
 </script>
 
@@ -682,8 +746,9 @@ var QT = (function () {
     var counts = md
       ? { exact: 0, same_words: 0, left_out: 0, marked: 0, altered: 0, not_found: 0 }
       : { exact: 0, punctuation_or_whitespace: 0, altered: 0, not_found: 0 };
-    var heads = md ? ["th_n", "th_quote", "th_verdict", "th_why", "th_sim", "th_wrote"]
-      : ["th_n", "th_quote", "th_verdict", "th_sim", "th_wrote"];
+    var heads = md
+      ? ["th_n", "th_quote", "th_words", "th_verdict", "th_why", "th_sim", "th_look", "th_wrote"]
+      : ["th_n", "th_quote", "th_words", "th_verdict", "th_sim", "th_look", "th_wrote"];
     var table = document.createElement("table");
     var head = document.createElement("tr");
     heads.forEach(function (h) {
@@ -692,24 +757,30 @@ var QT = (function () {
       head.appendChild(th);
     });
     table.appendChild(head);
-    quotes.forEach(function (q, i) {
+    var rows = quotes.map(function (q, i) {
+      var v = md ? QM.verdict(source, q, threshold) : null;
+      var r = md ? v.check : QC.check(source, q, threshold);
+      var verdict = md ? v.verdict : r.category;
+      counts[verdict]++;
+      var qWords = QC.words(QC.cleanQuote(q));
+      var changed = verdict === "altered" || verdict === "marked";
+      return {
+        n: i + 1, quote: QC.cleanQuote(q), words: qWords.length, verdict: verdict,
+        why: md ? v.why : "", check: r,
+        differ: changed && r.studentWrote !== null ? QT.differ(qWords, QC.words(r.studentWrote)) : 0
+      };
+    });
+    if (document.getElementById("order").checked) rows = QT.order(rows);
+    rows.forEach(function (x) {
       var row = document.createElement("tr");
-      cell(row, String(i + 1));
-      cell(row, QC.cleanQuote(q));
-      var r;
-      if (md) {
-        var v = QM.verdict(source, q, threshold);
-        r = v.check;
-        counts[v.verdict]++;
-        cell(row, t(LABELS[v.verdict]), v.verdict);
-        cell(row, v.why ? t("why_" + v.why) : "");
-      } else {
-        r = QC.check(source, q, threshold);
-        counts[r.category]++;
-        cell(row, t(LABELS[r.category]), r.category);
-      }
-      cell(row, r.similarity.toFixed(3));
-      cell(row, r.studentWrote === null ? "" : r.studentWrote);
+      cell(row, String(x.n));
+      cell(row, x.quote);
+      cell(row, String(x.words));
+      cell(row, t(LABELS[x.verdict]), x.verdict);
+      if (md) cell(row, x.why ? t("why_" + x.why) : "");
+      cell(row, x.check.similarity.toFixed(3));
+      cell(row, QT.look(lang, x.differ));
+      cell(row, x.check.studentWrote === null ? "" : x.check.studentWrote);
       table.appendChild(row);
     });
     p.textContent = md ? QT.summaryMd(lang, counts) : QT.summary(lang, counts);
@@ -730,6 +801,7 @@ var QT = (function () {
 
   document.getElementById("run").addEventListener("click", run);
   document.getElementById("md").addEventListener("change", function () { if (shown) run(); });
+  document.getElementById("order").addEventListener("change", function () { if (shown) run(); });
   document.getElementById("lang").addEventListener("change", function (e) {
     lang = QT.pick([e.target.value]);
     applyLanguage();
